@@ -3,3 +3,8 @@ docs/superpowers/
 
 # Scratch output from browser tooling
 .playwright-mcp/
+
+# Secrets
+.env
+.env.*
+!.env.example
