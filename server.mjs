@@ -2,7 +2,6 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { GoogleGenAI, Type } from "@google/genai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CREATIVE_DIRECTOR_ROOT = path.join(
@@ -16,24 +15,6 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(PUBLIC_DIR));
-
-const readFilesDeclaration = {
-  name: "read_creative_director_files",
-  description:
-    "Read one or more files from the installed Creative Director skill. Paths are relative to the creative-director directory. Use this whenever SKILL.md tells you to load/open a [[wikilink]] or inspect case-library files.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      paths: {
-        type: Type.ARRAY,
-        description:
-          "1-20 relative file paths, for example references/insight-mining.md or references/legendary-campaigns/cards/C001.md.",
-        items: { type: Type.STRING }
-      }
-    },
-    required: ["paths"]
-  }
-};
 
 function normalizeSkillPath(rawPath) {
   if (typeof rawPath !== "string" || !rawPath.trim()) {
@@ -94,15 +75,6 @@ async function readCreativeDirectorFiles(paths) {
 
   return { files };
 }
-
-function toGeminiContents(messages) {
-  return messages.map((message) => ({
-    role: message.role === "assistant" ? "model" : "user",
-    parts: [{ text: String(message.content ?? "") }]
-  }));
-}
-
-
 const groqReadFilesTool = {
   type: "function",
   function: {
@@ -219,89 +191,24 @@ app.post("/api/creative-director", async (req, res) => {
       return res.status(400).json({ error: "messages is required." });
     }
 
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "GROQ_API_KEY is not configured." });
+    }
+
     const skill = await fs.readFile(SKILL_PATH, "utf8");
     const systemInstruction =
       skill +
       "\n\nRuntime file access: when the skill instructs you to load/open a [[wikilink]] or inspect a referenced case, use read_creative_director_files. Paths are relative to the creative-director directory. Do not assume file contents you have not read.";
 
-    const groqApiKey = process.env.GROQ_API_KEY;
-
-    if (groqApiKey) {
-      const text = await runGroq({
-        apiKey: groqApiKey,
-        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-        systemInstruction,
-        messages
-      });
-
-      return res.json({ text });
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-
-    if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is not configured." });
-    }
-    const ai = new GoogleGenAI({ apiKey });
-    const contents = toGeminiContents(messages);
-    const config = {
+    const text = await runGroq({
+      apiKey,
+      model: "openai/gpt-oss-120b",
       systemInstruction,
-      tools: [{ functionDeclarations: [readFilesDeclaration] }]
-    };
+      messages
+    });
 
-    const maxToolRounds = 24;
-
-    for (let round = 0; round <= maxToolRounds; round += 1) {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config
-      });
-
-      const functionCalls = response.functionCalls ?? [];
-      if (functionCalls.length === 0) {
-        return res.json({ text: response.text ?? "" });
-      }
-
-      if (round === maxToolRounds) {
-        return res.status(500).json({
-          error: "Creative Director exceeded the maximum file-reading rounds."
-        });
-      }
-
-      const modelContent = response.candidates?.[0]?.content;
-      if (!modelContent) {
-        return res.status(500).json({ error: "Model returned no content." });
-      }
-      contents.push(modelContent);
-
-      const functionResponses = [];
-      for (const call of functionCalls) {
-        if (call.name !== "read_creative_director_files") {
-          functionResponses.push({
-            functionResponse: {
-              name: call.name,
-              response: { error: "Unknown function." }
-            }
-          });
-          continue;
-        }
-
-        const result = await readCreativeDirectorFiles(call.args?.paths);
-        functionResponses.push({
-          functionResponse: {
-            name: call.name,
-            response: result
-          }
-        });
-      }
-
-      contents.push({
-        role: "user",
-        parts: functionResponses
-      });
-    }
+    return res.json({ text });
   } catch (error) {
     console.error(error);
     res.status(500).json({
