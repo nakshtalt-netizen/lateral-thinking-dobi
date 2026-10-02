@@ -200,7 +200,7 @@ app.post("/api/creative-director", async (req, res) => {
     const systemInstruction =
       skill +
       "\n\nRuntime file access: when the skill instructs you to load/open a [[wikilink]] or inspect a referenced case, use read_creative_director_files. Paths are relative to the creative-director directory. Do not assume file contents you have not read." +
-      "\n\nOutput contract for this app: apply the Creative Director methodology internally, but when the user asks for TV promo voice-over copy, return only the requested voice-over variants. Do not show phases, brief, insight, scores, rationale, discarded directions, recommendation, or process notes. Do not ask follow-up questions when the request already gives enough constraints to write. Preserve the user's requested number of variants and word limit.";
+      "\n\nOutput contract for this app: apply the Creative Director methodology internally, but when the user asks for TV promo voice-over copy, return only the requested voice-over variants. Do not show phases, brief, insight, scores, rationale, discarded directions, recommendation, or process notes. Do not ask follow-up questions when the request already gives enough constraints to write. For TV promo voice-over copy, return 5 variants by default, each built from a clearly different creative angle. If the user explicitly requests a different number, follow that number. Preserve the user's word limit.";
 
     const text = await runGroq({
       apiKey,
