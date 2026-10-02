@@ -214,8 +214,6 @@ async function runGroq({ apiKey, model, systemInstruction, messages }) {
 
 app.post("/api/creative-director", async (req, res) => {
   try {
-    const provider = (process.env.AI_PROVIDER || "gemini").toLowerCase();
-
     const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
     if (messages.length === 0) {
       return res.status(400).json({ error: "messages is required." });
@@ -226,17 +224,12 @@ app.post("/api/creative-director", async (req, res) => {
       skill +
       "\n\nRuntime file access: when the skill instructs you to load/open a [[wikilink]] or inspect a referenced case, use read_creative_director_files. Paths are relative to the creative-director directory. Do not assume file contents you have not read.";
 
-    if (provider === "groq") {
-      const apiKey = process.env.GROQ_API_KEY;
-      const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+    const groqApiKey = process.env.GROQ_API_KEY;
 
-      if (!apiKey) {
-        return res.status(500).json({ error: "GROQ_API_KEY is not configured." });
-      }
-
+    if (groqApiKey) {
       const text = await runGroq({
-        apiKey,
-        model,
+        apiKey: groqApiKey,
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         systemInstruction,
         messages
       });
@@ -244,22 +237,12 @@ app.post("/api/creative-director", async (req, res) => {
       return res.json({ text });
     }
 
-    if (provider !== "gemini") {
-      return res.status(500).json({
-        error: `Unsupported AI_PROVIDER: ${provider}`
-      });
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
     if (!apiKey) {
       return res.status(500).json({ error: "GEMINI_API_KEY is not configured." });
     }
-    if (!model) {
-      return res.status(500).json({ error: "GEMINI_MODEL is not configured." });
-    }
-
     const ai = new GoogleGenAI({ apiKey });
     const contents = toGeminiContents(messages);
     const config = {
