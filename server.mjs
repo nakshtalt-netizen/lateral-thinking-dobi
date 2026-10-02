@@ -126,7 +126,7 @@ app.post("/api/creative-director", async (req, res) => {
 
     for (let round = 0; round < 12; round += 1) {
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3.6-flash",
         contents,
         config
       });
