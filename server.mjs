@@ -102,17 +102,119 @@ function toGeminiContents(messages) {
   }));
 }
 
+
+const groqReadFilesTool = {
+  type: "function",
+  function: {
+    name: "read_creative_director_files",
+    description:
+      "Read one or more files from the installed Creative Director skill. Paths are relative to the creative-director directory. Use this whenever SKILL.md tells you to load/open a [[wikilink]] or inspect case-library files.",
+    parameters: {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          description:
+            "1-20 relative file paths, for example references/insight-mining.md or references/legendary-campaigns/cards/C001.md.",
+          items: { type: "string" }
+        }
+      },
+      required: ["paths"]
+    }
+  }
+};
+
+async function runGroq({ apiKey, model, systemInstruction, messages }) {
+  const groqMessages = [
+    { role: "system", content: systemInstruction },
+    ...messages.map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: String(message.content ?? "")
+    }))
+  ];
+
+  const maxToolRounds = 24;
+
+  for (let round = 0; round <= maxToolRounds; round += 1) {
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          messages: groqMessages,
+          tools: [groqReadFilesTool],
+          tool_choice: "auto"
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const error = new Error(
+        data?.error?.message || `Groq request failed with status ${response.status}.`
+      );
+      error.status = response.status;
+      throw error;
+    }
+
+    const message = data?.choices?.[0]?.message;
+    if (!message) {
+      throw new Error("Groq returned no message.");
+    }
+
+    const toolCalls = Array.isArray(message.tool_calls)
+      ? message.tool_calls
+      : [];
+
+    if (toolCalls.length === 0) {
+      return message.content ?? "";
+    }
+
+    if (round === maxToolRounds) {
+      throw new Error(
+        "Creative Director exceeded the maximum file-reading rounds."
+      );
+    }
+
+    groqMessages.push(message);
+
+    for (const call of toolCalls) {
+      let result;
+
+      if (call?.function?.name !== "read_creative_director_files") {
+        result = { error: "Unknown function." };
+      } else {
+        try {
+          const args = JSON.parse(call.function.arguments || "{}");
+          result = await readCreativeDirectorFiles(args.paths);
+        } catch (error) {
+          result = {
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+      }
+
+      groqMessages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        name: call.function.name,
+        content: JSON.stringify(result)
+      });
+    }
+  }
+
+  throw new Error("Creative Director did not produce a final response.");
+}
+
 app.post("/api/creative-director", async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL;
-
-    if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is not configured." });
-    }
-    if (!model) {
-      return res.status(500).json({ error: "GEMINI_MODEL is not configured." });
-    }
+    const provider = (process.env.AI_PROVIDER || "gemini").toLowerCase();
 
     const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
     if (messages.length === 0) {
@@ -123,6 +225,40 @@ app.post("/api/creative-director", async (req, res) => {
     const systemInstruction =
       skill +
       "\n\nRuntime file access: when the skill instructs you to load/open a [[wikilink]] or inspect a referenced case, use read_creative_director_files. Paths are relative to the creative-director directory. Do not assume file contents you have not read.";
+
+    if (provider === "groq") {
+      const apiKey = process.env.GROQ_API_KEY;
+      const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+
+      if (!apiKey) {
+        return res.status(500).json({ error: "GROQ_API_KEY is not configured." });
+      }
+
+      const text = await runGroq({
+        apiKey,
+        model,
+        systemInstruction,
+        messages
+      });
+
+      return res.json({ text });
+    }
+
+    if (provider !== "gemini") {
+      return res.status(500).json({
+        error: `Unsupported AI_PROVIDER: ${provider}`
+      });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    const model = process.env.GEMINI_MODEL;
+
+    if (!apiKey) {
+      return res.status(500).json({ error: "GEMINI_API_KEY is not configured." });
+    }
+    if (!model) {
+      return res.status(500).json({ error: "GEMINI_MODEL is not configured." });
+    }
 
     const ai = new GoogleGenAI({ apiKey });
     const contents = toGeminiContents(messages);
