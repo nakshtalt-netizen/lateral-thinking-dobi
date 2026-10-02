@@ -147,6 +147,7 @@ app.post("/api/creative-director", async (req, res) => {
         if (call.name !== "read_creative_director_files") {
           functionResponses.push({
             functionResponse: {
+              id: call.id,
               name: call.name,
               response: { error: "Unknown function." }
             }
@@ -156,6 +157,7 @@ app.post("/api/creative-director", async (req, res) => {
 
         functionResponses.push({
           functionResponse: {
+            id: call.id,
             name: call.name,
             response: await readCreativeDirectorFiles(call.args?.paths)
           }
