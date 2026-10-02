@@ -124,12 +124,38 @@ app.post("/api/creative-director", async (req, res) => {
       tools: [{ functionDeclarations: [readFilesDeclaration] }]
     };
 
+    let retriesLeft = 2;
+    const retryDelaysMs = [2000, 5000];
+
+    async function generateWith503Retry() {
+      for (;;) {
+        try {
+          return await ai.models.generateContent({
+            model: "gemini-3.6-flash",
+            contents,
+            config
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const is503 =
+            error?.status === 503 ||
+            message.includes('"code":503') ||
+            message.includes("UNAVAILABLE") ||
+            message.includes("high demand");
+
+          if (!is503 || retriesLeft === 0) {
+            throw error;
+          }
+
+          const delayMs = retryDelaysMs[2 - retriesLeft];
+          retriesLeft -= 1;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+
     for (let round = 0; round < 12; round += 1) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents,
-        config
-      });
+      const response = await generateWith503Retry();
 
       const functionCalls = response.functionCalls ?? [];
       if (functionCalls.length === 0) {
